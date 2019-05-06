@@ -14,8 +14,8 @@ import os
 fileloc = open(str(filedialog.askopenfilename())) #opens the location of csv
 op_colmn = 'Overpush (mW)' #column name of overpush
 zpw_colmn = 'Normalized Mean (dTDP)' #delta touchdown
-fileout = 'C:\\Users\\nmang7175125\\Documents\\Box Sync\\pyton code_ZPW\\test\\'
-fileout_1 = 'C:\\Users\\nmang7175125\\Documents\\Box Sync\\pyton code_ZPW\\'
+fileout = 'C:\\Users\\Documents\\Box Sync\\pyton code_ZPW\\test\\'
+fileout_1 = 'C:\\Users\\Documents\\Box Sync\\pyton code_ZPW\\'
 if not os.path.exists(fileout):
     os.makedirs(fileout)
 data = pd.read_csv(fileloc, delimiter =',') #extractor
