@@ -1,0 +1,525 @@
+############################################################
+##
+## Copyright 2013 Guzik Technical Enterprises
+##
+## Description: a template for Python EMPF tests
+##
+############################################################
+
+
+##
+## import Python EMPF definitions
+##
+import wite.empf as empf
+
+##
+## import WDK definition
+##
+import wite
+import wite.graph
+import win32com.client
+from win32com.client import CastTo, WithEvents, Dispatch
+import numpy as np
+import sys
+import ctypes
+import ConfigParser
+##
+## getTestOptions() specifies test type, test type modifiers and config table type
+##
+def getTestOptions():
+    return [
+        ## Add your test options here
+        ##
+        ## Test Type
+        empf.testTypes.ttNormal,
+        #empf.testTypes.ttOperation,
+        #empf.testTypes.ttResultHandler,
+        ##
+        ## Config Table Type
+        empf.configTableTypes.cttZS,
+        #empf.configTableTypes.cttSimple,
+        #empf.configTableTypes.cttConf,
+        #empf.configTableTypes.cttZSConf,
+        #empf.configTableTypes.cttHead,
+        #empf.configTableTypes.cttZSHead,
+        ##
+        ## Test type modifiers:
+        #empf.testTypeModifiers.ttModNoResults,
+        #empf.testTypeModifiers.ttModRequirePreampInit,
+        #empf.testTypeModifiers.ttModStoppedDevice,
+    ]
+##
+## getParams() declares all the test parameters
+##
+def getParams():
+    return [
+
+        empf.param( 'Run', 1, set={0:'False', 1:'True'},
+            description = 'Enable TD Detection',
+            persistent = True ),
+        empf.param( 'Threshold', 120.0,
+            range = empf.erange.nonStrict(100.0,180.0),
+            description = 'Set TD Threshold',
+            persistent = True),
+        empf.param( 'TFC_Start', 40.0,
+            range = empf.erange.nonStrict(30.0,160.0),
+            description = 'Begin TFC sweep',
+            persistent = True),
+        empf.param( 'TFC_End', 140.0,
+            range = empf.erange.nonStrict(30.0,160.0),
+            description = 'End TFC sweep',
+            persistent = True),
+        empf.param( 'TFC_Step', 0.68,
+            range = empf.erange.nonStrict(0,10),
+            description = 'TFC step size',
+            persistent = True),
+        empf.param( 'Capt_Time', 30.0,
+            range = empf.erange.nonStrict(10.0,40.0),
+            description = "Signal Capture Time in milliseconds",
+            persistent = True),
+    ]
+
+##
+## getResults() declares all the test results
+##
+def getResults():
+    return [
+        ## Add your results here
+        ##
+        ## Simplest result declaration
+        empf.result( 'pyReadTD' ),
+        empf.result( 'pyWriteTD' ),
+        empf.result( 'pyWSSNR' ),
+        empf.result( 'pyBER' ),
+        empf.result( 'pyLocal_Eff' ),
+        empf.result( 'pyLinear_Eff' ),
+        empf.result( 'pyRead_PB' ),
+    ]
+
+##
+## runTest() specifies the measurement procedure for the test
+##
+def runTest( params, results ):
+    ## Add your runTest code here
+    ##
+    ## getting a parameter value:
+    #value =  params[ 'ParamFloat' ]
+    #value_in_inches = params[ 'ParamFloat', empf.units.inch ]
+    ##
+    ## reporting a result:
+    #results[ 'MyResult' ] = value
+    ##
+    ## reporting a sequence of results:
+    #results[ 'MyResult' ] = [ value, value + 1, value + 2 ]
+    ##
+    ## reporting a result with a confID = 3.14
+    #results[ 'MyResult', 3.14 ] = value
+    ##
+
+    ##Initialize TEO Board
+    HMan = Dispatch("TSX_HMan")
+    sys = CastTo(HMan.GetSystem("HDD_TEST_AND_DEVELOPMENT_SYSTEM"), "ITS_DriverIdentity")
+    test_sys = CastTo(sys, "ITS_TestDevice")
+    td_sense = CastTo(test_sys.TD_Sensor, "ITS_SignalCapturing")
+    td_filter = CastTo(test_sys.TD_Sensor, "ITS_TDFilter")
+
+    ##Initialize WITE
+    ls = wite.WDK.Legacy.Spinstand
+    hatfc = wite.WDK.Legacy.HATFC
+    GetCellFrequency = wite.WDK.Legacy.Clock.GetCellFrequency
+    curHd = ls.GetHead()
+    curPID = wite.WDK.WUTLGetEnv.GetEnvPartID()
+    curTrack = wite.WDK.WUTLGetEnv.GetEnvTrack()
+    hatfc.SetHeaterType(curHd, 0)
+    hatfc.SetUnit(curHd, 2)
+    hatfc.SetEnable(curHd, True)
+
+##    tfc_start = params[ 'TFC_Start' ]
+##    tfc_end = params[ 'TFC_End' ]
+##    tfc_step = params[ 'TFC_Step' ]
+##    TFC_crit = params[ 'Threshold' ]
+##    Capt_Time = params[ 'Capt_Time' ]
+
+####  Manual Input
+##    tfc_start = 40
+##    tfc_end = 150
+##    tfc_step = 0.7
+##    TFC_crit = 110
+##    Capt_Time = 30
+
+####  Read from Ini
+    tfc_start = float(ConfigSectionMap("Touchdown")['tdfrom'])
+    tfc_end = float(ConfigSectionMap("Touchdown")['tdto'])
+    tfc_step = float(ConfigSectionMap("Touchdown")['tdstep'])
+    TFC_crit = float(ConfigSectionMap("Touchdown")['tdthreshold'])
+    Capt_Time = float(ConfigSectionMap("Touchdown")['tdcapttime'])
+    pb_nm = 1
+    
+    t_detect = Capt_Time/1000
+    i = tfc_start
+    i2 = tfc_start
+    max_mw = tfc_end
+    step_p = tfc_step
+    
+
+##Reader TD
+    arr_indx = 0
+    Noise_Sum = 0
+    tfc_mw = []
+    AE = []
+    Detect_TD = False
+    Find_TD = True
+    td_filter.SetHighPass(490)
+    td_filter.SetLowPass(30)
+
+
+    while (Find_TD == True):
+        hatfc.SetPower(curHd, 0, i)
+        td_sense.StartCapturing(64,9,t_detect,0,0,0)
+        wf = td_sense.GetWaveform(6)
+        L = wf.GetWaveformLength()
+        td_temp = 0
+        temp = 0
+        arr = []
+        for j in range(0, L):
+            temp = wf.GetWaveformData(j)
+            arr.append(temp)
+            td_temp = td_temp + temp * temp
+        r1 = np.sqrt(td_temp/L)
+        if arr_indx < 10:
+            Noise_Sum = Noise_Sum + r1
+            Noise_Ref = Noise_Sum / (arr_indx + 1)
+        elif r1 >=((TFC_crit/100.0)*Noise_Ref):
+            Find_TD = False
+            Detect_TD = True
+        tfc_mw.append(i)
+        i = i + step_p
+        if i>=max_mw:
+            Find_TD = False
+            Detect_TD = False
+        AE.append(r1)
+        arr_indx=arr_indx+1
+        
+    hatfc.SetPower(curHd, 0, 5)
+    hatfc.SetPower(curHd, 1, 5)
+
+##Writer TD
+    OrigTrack = wite.WDK.Legacy.Spinstand.GetTrack()
+    SetTrack = wite.WDK.Legacy.Spinstand.SetTrack
+    SetTrack(OrigTrack-1000)
+    arr_indx = 0
+    Noise_Sum = 0
+    tfcw_mw = []
+    AE2 = []
+    Detect_TD2 = False
+    Find_TD2 = True
+    td_filter.SetHighPass(490)
+    td_filter.SetLowPass(30)
+    RPM = wite.WDK.Legacy.SpinstandConfig.GetRPM()
+    Rev = 6
+    t_detect2 = 60.0/RPM * Rev
+    wtdflux = wite.WDK.Legacy.Clock.GetFluxFrequency()
+    flux=wtdflux/6
+    op = wite.WDK.Legacy.Operation
+    while (Find_TD2 == True):
+        hatfc.SetPower(curHd, 1, i2)      
+        td_sense.StartCapturing(64,9,t_detect2,0,0,0)
+        op.WriteFlux(flux,Rev)
+        wf = td_sense.GetWaveform(6)
+        L = wf.GetWaveformLength()
+        td_temp = 0
+        temp = 0
+        arr = []
+        for j in range(0, L):
+            temp = wf.GetWaveformData(j)
+            arr.append(temp)
+            td_temp = td_temp + temp * temp
+        r1 = np.sqrt(td_temp/L)
+        if arr_indx < 10:
+            Noise_Sum = Noise_Sum + r1
+            Noise_Ref2 = Noise_Sum / (arr_indx + 1)
+        elif r1 >=((TFC_crit/100.0)*Noise_Ref2):
+            Find_TD2 = False
+            Detect_TD2 = True
+        tfcw_mw.append(i2)
+        i2 = i2 + step_p
+        if i2 >=max_mw:
+            Find_TD2 = False
+            Detect_TD2 = False
+        AE2.append(r1)
+        arr_indx=arr_indx+1
+
+    SetTrack(OrigTrack)
+    hatfc.SetPower(curHd, 0, 5)
+    hatfc.SetPower(curHd, 1, 5)
+    hatfc.SetEnable(curHd, False)
+
+    AE_p = AE/Noise_Ref
+    AE2_p = AE2/Noise_Ref2
+    
+    if Detect_TD == True:
+        TFC_TD = i - step_p
+    else:
+        TFC_TD = 0
+
+    if Detect_TD2 == True:
+        TFC_TD2 = i2 - step_p
+    else:
+        TFC_TD2 = 0
+      
+    results[ 'pyReadTD', 0] = TFC_TD
+    results[ 'pyWriteTD', 0] = TFC_TD2
+    x_axis = wite.graph.GGraphAxis()
+    y_axis = wite.graph.GGraphAxis()
+    plot = wite.graph.GGraphPlot()
+    plot.XAxis = x_axis
+    plot.YAxis = y_axis
+    plotw = wite.graph.GGraphPlot()
+    plotw.XAxis = x_axis
+    plotw.YAxis = y_axis
+    L=np.shape(tfc_mw)[0]
+    L2=np.shape(tfcw_mw)[0]
+    graph = wite.graph.GGraph()
+    graph.AddPlot(plot)
+    graph.AddPlot(plotw)
+    graph.Caption = "Touchdown"
+    graph.ShowGraph()
+    graph.ResultCount = 4
+    graph.SetResultName(0, "Head S/N")
+    graph.SetResultValue(0,0, curPID)
+    graph.SetResultName(1, "Track")
+    graph.SetResultValue(1,0, curTrack)
+    graph.SetResultName(2, "AE_RTD")
+    graph.SetResultValue(2,0, "{0:.2f}".format(TFC_TD))
+    graph.SetResultName(3, "AE_WTD")
+    graph.SetResultValue(3,0, "{0:.2f}".format(TFC_TD2))
+    for i in range(0,L):
+        plot.AddPoint(tfc_mw[i],AE_p[i])
+  
+    for j in range(0,L2):
+        plotw.AddPoint(tfcw_mw[j],AE2_p[j])
+        
+    pass
+##Write Servo
+    hatfc.SetEnable(curHd, True)
+    hatfc.SetPower(curHd, 0, TFC_TD - 15)
+    hatfc.SetPower(curHd, 1, TFC_TD - 20)
+    find = wite.WDK.WiteControl.WiteTestControl.FindTest
+    servo_erase = find("Servo Erase")
+    params1 = servo_erase.CreateTestParameters()
+    servo_write = find("Write Servo")
+    params2 = servo_write.CreateTestParameters()
+
+    Result1 = servo_erase.Run(params1)
+    Result2 = servo_write.Run(params2)
+
+##TFC Efficiency Measurement
+    Amp = []
+    Amp = np.array(Amp)
+    spacelist = []
+    clock = wite.WDK.Legacy.Clock
+    MF = 0.25 * clock.GetCellFrequency()
+    TrackToRadius = wite.WDK.Legacy.SpinstandInfo.TrackToRadius
+    GetTrack = wite.WDK.Legacy.Spinstand.GetTrack()
+    GetRPM = wite.WDK.Legacy.SpinstandConfig.GetRPM
+    rad = TrackToRadius(GetTrack)
+    RPM = GetRPM()
+    freq = MF * 1000000
+    RPS = RPM/60 
+    Wave_Length = (2*3.141592653)*(rad*25.4)*RPS*(1000000/freq) 
+
+##Configure Filters
+    filtr = wite.WDK.Legacy.Filter
+    orig_filter = filtr.GetFilter()
+    orig_ow_filter = filtr.GetOverwriteFilter()
+    orig_ow_freq = filtr.GetOverwriteFreq(orig_filter)
+    filtr.SetOverwriteFreq(orig_filter,MF)
+    filtr.SetFilter(3)
+
+##Set TFC for writing pattern
+    hatfc.SetHeaterType(curHd, 0)
+    hatfc.SetUnit(curHd, 2)
+    hatfc.SetEnable(curHd, True)
+    orig_wtfc = hatfc.GetPower(curHd, 1)
+    hatfc.SetPower(curHd, 1, TFC_TD - 20)
+
+##Erase Track
+    opr = wite.WDK.Legacy.OprErase
+    opr.SystemBandErase(1)
+
+##Write Pattern
+    op = wite.WDK.Legacy.Operation
+    op.WriteFlux(MF*2,1)
+    
+##Return to original TFC
+    hatfc.SetPower(curHd, 1, orig_wtfc)
+
+##Start Mechanical Clearance calc w/ TFC Sweep
+    tfc_mw2 = []
+    index = 0
+    TAA = wite.WDK.Legacy.MeasAmplitude.TAA
+    for tfc_p in np.arange(tfc_start, TFC_TD, tfc_step):
+        hatfc.SetPower(curHd, 0, tfc_p)
+        
+        temp = []
+        temp_sum = 0
+##        for j in range(0,7):
+##            temp.append(TAA(3,1))
+##        temp = np.delete(temp,np.where(temp==np.max(temp)))
+##        temp = np.delete(temp,np.where(temp==np.min(temp)))
+##        temp_sum = np.sum(temp)
+##        temp_sum = temp_sum/5
+
+        temp_sum = 0
+        for j in range(0,5):
+           temp_sum = temp_sum+TAA(3,1)
+        temp_sum = temp_sum/5
+        Amp = np.append(Amp,temp_sum)
+        Amp = np.around(Amp,decimals = 9)
+        spacelist.append((Wave_Length/(2*3.14159263))*np.log(Amp[0]/Amp[index]))
+        index = index+1
+        tfc_mw2.append(tfc_p)
+
+    hatfc.SetPower(curHd, 0, 5)
+    hatfc.SetPower(curHd, 1, 5)
+    hatfc.SetEnable(curHd, False)
+    spacelist = np.around(spacelist,decimals = 9)
+    x_axis2 = wite.graph.GGraphAxis()
+    y_axis2 = wite.graph.GGraphAxis()
+    plot2 = wite.graph.GGraphPlot()
+    plot2.XAxis = x_axis2
+    plot2.YAxis = y_axis2
+    graph2 = wite.graph.GGraph()
+    graph2.AddPlot(plot2)
+    graph2.Caption = "Mechanical Clearance"
+    graph2.ShowGraph()
+    
+    for i in range(0,L):
+        plot2.AddPoint(tfc_mw2[i],spacelist[i])
+
+    coefs = np.polyfit(tfc_mw2, spacelist,2)
+    fit = np.poly1d(coefs)
+    fit_plot = fit(tfc_mw2)
+    plot3 = wite.graph.GGraphPlot()
+    plot3.XAxis = x_axis2
+    plot3.YAxis = y_axis2
+    graph2.AddPlot(plot3)
+    graph2.ResultCount = 9
+    graph2.SetResultName(0, "Head S/N")
+    graph2.SetResultValue(0,0, curPID)
+    graph2.SetResultName(1, "Track")
+    graph2.SetResultValue(1,0, curTrack)
+    graph2.SetResultName(2, "AE_RTD")
+    graph2.SetResultValue(2,0, "{0:.2f}".format(TFC_TD))
+    graph2.SetResultName(3, "c2")
+    graph2.SetResultValue(3,0, coefs[0])
+    graph2.SetResultName(4, "c1")
+    graph2.SetResultValue(4,0, coefs[1])
+    graph2.SetResultName(5, "c0")
+    graph2.SetResultValue(5,0, coefs[2])
+
+##Pullback Calculation
+    y = np.poly1d(coefs)
+    y2 = y(TFC_TD)+pb_nm
+    coefs2 = [coefs[0], coefs[1], coefs[2]-y2]
+    x = np.roots(coefs2)
+    x1 = TFC_TD
+    if abs(x[0]-x1)<50:
+        x2=x[0]
+    else:
+        x2=x[1]
+    pb_mw = abs(x1-x2)
+    eff = pb_nm/pb_mw
+
+##Linear Efficiency
+    y3=abs(y(50))
+    eff_lin = y3/abs(50-tfc_start)
+    
+    graph2.SetResultName(6, "ReaderPB")
+    graph2.SetResultValue(6,0, "{0:.2f}".format(pb_mw))
+    graph2.SetResultName(7, "Local_Efficiency")
+    graph2.SetResultValue(7,0, eff)
+    graph2.SetResultName(8, "Linear_Efficiency")
+    graph2.SetResultValue(8,0,eff_lin)
+    results[ 'pyLocal_Eff',0 ] = eff
+    results[ 'pyRead_PB',0 ] = pb_mw
+    results[ 'pyLinear_Eff',0] = eff_lin
+    
+    for i in range(0,L):
+        plot3.AddPoint(tfc_mw2[i],fit_plot[i])
+    pass
+##WROffset
+    hatfc.SetEnable(curHd, True)
+    hatfc.SetPower(curHd, 0, TFC_TD - 9)
+    hatfc.SetPower(curHd, 1, TFC_TD - 15)
+    wroffset = find("WROffset")
+    params10 = wroffset.CreateTestParameters()
+    Result10 = wroffset.Run(params10)
+    hatfc.SetPower(curHd, 0, 5)
+    hatfc.SetPower(curHd, 1, 5)
+    hatfc.SetEnable(curHd, False)
+    
+##WSSNR
+    hatfc.SetEnable(curHd, True)
+    hatfc.SetPower(curHd, 0, TFC_TD - 9)
+    hatfc.SetPower(curHd, 1, TFC_TD - 15)
+    wssnr = find("WS_SNR._Digital")
+    params3 = wssnr.CreateTestParameters()
+    Result3 = wssnr.Run(params3)
+    ResultData = Result3.GetResult("WS_SNR")
+    count = 0
+    for res in ResultData:
+        wssnr_result = res.GetValue()
+        results[ 'pyWSSNR', count] = wssnr_result
+
+    hatfc.SetPower(curHd, 0, 5)
+    hatfc.SetPower(curHd, 1, 5)
+    hatfc.SetEnable(curHd, False)
+
+##BER
+    hatfc.SetEnable(curHd, True)
+    hatfc.SetPower(curHd, 0, TFC_TD - 9)
+    hatfc.SetPower(curHd, 1, TFC_TD - 15)
+
+    besconfigure = find("besx_Configure")
+    params4 = besconfigure.CreateTestParameters()
+    Result4 = besconfigure.Run(params4)
+
+    ps0 = find("PS0")
+    params5 = ps0.CreateTestParameters()
+    Result5 = ps0.Run(params5)
+
+    besoptimize = find("besx_Optimize")
+    params6 = besoptimize.CreateTestParameters()
+    Result6 = besoptimize.Run(params6)
+
+    besoptimize = find("ML0")
+    params7 = besoptimize.CreateTestParameters()
+    Result7 = besoptimize.Run(params7)
+
+    bestrackprofile = find("besx_TrackProfile")
+    params8 = bestrackprofile.CreateTestParameters()
+    Result8 = bestrackprofile.Run(params8)
+    ResultData = Result8.GetResult("besxMin_bitER")
+    count = 0
+    for res in ResultData:
+        ber = res.GetValue()
+        results[ 'pyBER', count] = ber
+    hatfc.SetPower(curHd, 0, 5)
+    hatfc.SetPower(curHd, 1, 5)
+    hatfc.SetEnable(curHd, False)
+    
+def ConfigSectionMap(section):
+    Config = ConfigParser.ConfigParser()
+    Config.read("c:\\Wite32_450B327\pytemp.ini")
+    dict1 = {}
+    options = Config.options(section)
+    for option in options:
+        try:
+            dict1[option]=Config.get(section, option)
+            if dict1[option] == -1:
+                DebugPrint("skip: %s" % option)
+        except:
+            print("exception on %s!" % option)
+            dict1[option] = None
+    return dict1    
