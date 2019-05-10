@@ -1,0 +1,19 @@
+import os
+import configparser
+
+config = configparser.RawConfigParser()
+
+#directory of folder
+testdir = os.path.dirname(os.path.realpath(__file__))
+#file directory
+newdir = testdir + "\\test100.ini"
+
+#config ini
+config.add_section('testdata')
+config.add_section('testdata2')
+config.set('testdata','val', '200')
+config.set('testdata2','val', '300')
+
+#write ini
+with open(newdir, 'w') as newini:
+    config.write(newini)
