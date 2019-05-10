@@ -1,0 +1,17 @@
+import csv
+
+#write sample.csv
+with open('test.csv', mode = 'w') as csv_file:
+    fieldnames=['test1' , 'results']
+    writer = csv.DictWriter(csv_file, fieldnames=fieldnames)
+    writer.writeheader()
+    writer.writerow({'test1': 'snr1', 'results': '1'})
+    writer.writerow({'test1': 'snr2', 'results': '2'})
+    writer.writerow({'test1': 'snr3', 'results': '3'})
+    writer.writerow({'test1': 'snr4', 'results': '4'})
+    writer.writerow({'test1': 'snr5', 'results': '5'})
+    writer.writerow({'test1': 'snr6', 'results': '6'})
+    
+    
+                
+                
