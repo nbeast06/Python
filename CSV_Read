@@ -1,1 +1,12 @@
+import csv
 
+with open('test.csv', mode = 'r') as csv_file:
+    csv_reader = csv.DictReader(csv_file)
+    line_count = 0
+    for row in csv_reader:
+        if line_count == 0:
+            print(f'data {", ".join(row)}')
+            line_count += 1
+        print(f'\t {row["test1"]} {row["results"]}')
+        line_count += 1
+    print(f'processed {line_count} lines.')
